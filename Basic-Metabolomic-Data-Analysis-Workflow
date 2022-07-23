@@ -7,7 +7,7 @@ import pandas as pd
 
 from sklearn.model_selection import train_test_split
 
-import cimcb as cb
+import cimcb_lite as cb
 
 print('All packages successfully loaded')
 
