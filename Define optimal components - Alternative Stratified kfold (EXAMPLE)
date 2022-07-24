@@ -1,0 +1,98 @@
+import numpy as np
+import pandas as pd
+
+from sklearn.model_selection import train_test_split
+
+import cimcb_lite as cb
+
+print('All packages successfully loaded')
+
+
+# The path to the input file (Excel spreadsheet)
+filename = 'GastricCancer_NMR.xlsx'
+
+# Load Peak and Data tables into two variables
+dataTable, peakTable = cb.utils.load_dataXL(filename, DataSheet='Data', PeakSheet='Peak')
+
+
+display(dataTable) # View and check the dataTable 
+
+
+display(peakTable) # View and check PeakTable
+
+
+# Create a clean peak table 
+
+rsd = peakTable['QC_RSD']  
+percMiss = peakTable['Perc_missing']  
+peakTableClean = peakTable[(rsd < 20) & (percMiss < 10)]   
+
+print("Number of peaks remaining: {}".format(len(peakTableClean)))
+
+
+# Extract and scale the metabolite data from the dataTable 
+
+peaklist = peakTableClean['Name']                   # Set peaklist to the metabolite names in the peakTableClean
+X = dataTable[peaklist].values                      # Extract X matrix from dataTable using peaklist
+Xlog = np.log10(X)                                  # Log scale (base-10)
+Xscale = cb.utils.scale(Xlog, method='auto')        # methods include auto, pareto, vast, and level
+Xknn = cb.utils.knnimpute(Xscale, k=3)              # missing value imputation (knn - 3 nearest neighbors)
+
+print("Xknn: {} rows & {} columns".format(*Xknn.shape))
+
+cb.plot.pca(Xknn,
+            pcx=1,                                                  # pc for x-axis
+            pcy=2,                                                  # pc for y-axis
+            group_label=dataTable['SampleType'])                    # labels for Hover in PCA loadings plot
+            
+            
+# Select subset of Data for statistical comparison
+dataTable2 = dataTable[(dataTable.Class == "GC") | (dataTable.Class == "HE")]  # Reduce data table only to GC and HE class members
+pos_outcome = "GC" 
+
+# Calculate basic statistics and create a statistics table.
+statsTable = cb.utils.univariate_2class(dataTable2,
+                                        peakTableClean,
+                                        group='Class',                # Column used to determine the groups
+                                        posclass=pos_outcome,         # Value of posclass in the group column
+                                        parametric=True)              # Set parametric = True or False
+
+# View and check StatsTable
+display(statsTable)
+
+
+# Save StatsTable to Excel
+statsTable.to_excel("stats.xlsx", sheet_name='StatsTable', index=False)
+print("done!")
+
+
+# Create a Binary Y vector for stratifiying the samples
+outcomes = dataTable2['Class']                                  # Column that corresponds to Y class (should be 2 groups)
+Y = [1 if outcome == 'GC' else 0 for outcome in outcomes]       # Change Y into binary (GC = 1, HE = 0)  
+Y = np.array(Y)                                                 # convert boolean list into to a numpy array
+
+
+train, validation, Ytrain, Yvalidation = train_test_split(dataTable2, Y, test_size=0.25, random_state = 10)
+
+
+# Extract and scale the metabolite data from the dataTable
+peaklist = peakTableClean['Name']                           # Set peaklist to the metabolite names in the peakTableClean
+XT = train[peaklist]                                    # Extract X matrix from DataTrain using peaklist
+XTlog = np.log(XT)                                          # Log scale (base-10)
+XTscale = cb.utils.scale(XTlog, method='auto')              # methods include auto, pareto, vast, and level
+XTknn = cb.utils.knnimpute(XTscale, k=3)                    # missing value imputation (knn - 3 nearest neighbors)
+
+
+X = XTknn
+y = Ytrain
+
+from sklearn.model_selection import StratifiedKFold
+skf = StratifiedKFold(n_splits=5, random_state=None)
+# X is the feature set and y is the target
+for train_index, test_index in skf.split(X,y): 
+    print("Train:", train_index, "Validation:", test_index) 
+    X_train, X_test = X[train_index], X[test_index] 
+    y_train, y_test = y[train_index], y[test_index]
+    
+    
+    
