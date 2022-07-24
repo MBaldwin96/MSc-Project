@@ -1,0 +1,82 @@
+import numpy as np
+import pandas as pd
+import cimcb_lite as cb
+from sklearn.model_selection import train_test_split
+
+print('All packages successfully loaded')
+
+
+seed_split = 40
+# seed_split = None
+
+
+# The path to the input file (Excel spreadsheet)
+filename = 'Data and Peak sheet.xlsx'
+#filename = 'MTBLS290db.xlsx'
+
+# Load Peak and Data tables into two variables
+dataTable, peakTable = cb.utils.load_dataXL(filename, DataSheet='Data', PeakSheet='Peaks')
+
+
+# Clean PeakTable and Extract PeakList
+RSD = peakTable['QC_RSD']
+percMiss = peakTable['Perc_missing']
+peakTableClean = peakTable[(RSD < 20) & (percMiss < 10)]
+peakList = peakTableClean['Name']
+
+# Select Subset of Data (Class "MD" or "CG" only)
+dataTable2 = dataTable[(dataTable.Class == "MD") | (dataTable.Class == "CG")]
+
+# Extract X Data
+X = dataTable2[peakList]
+
+# Create a Binary Y Vector 
+outcomes = dataTable2['Class']
+Y = [1 if outcome == 'MD' else 0 for outcome in outcomes]
+Y = np.array(Y)
+
+# Optional: Save Class Labels for Figure Legends
+Class = dataTable2.Class
+
+
+# Split Data into Train (2/3rd) and Test (1/3rd)
+XTrain, XTest, YTrain, YTest, ClassTrain, ClassTest = train_test_split(X,
+                                                                       Y,
+                                                                       Class,
+                                                                       test_size=1/3,
+                                                                       stratify=Y,
+                                                                       random_state=seed_split)
+                                                                       
+# Extract X Train Data                          
+XTrainLog = np.log(XTrain)
+XTrainScale = cb.utils.scale(XTrainLog, method='auto')
+XTrainKnn = cb.utils.knnimpute(XTrainScale, k=3)
+
+# Extract X Test Data
+XTestLog = np.log(XTest)
+XTestScale = cb.utils.scale(XTestLog, method='auto')
+XTestKnn = cb.utils.knnimpute(XTestScale, k=3)
+
+
+# Parameter Dictionary
+param_dict = {'n_components': [1, 2, 3, 4, 5, 6]}
+
+# Initialise
+cv = cb.cross_val.kfold(model=cb.model.PLS_SIMPLS,
+                        X=XTrainKnn,
+                        Y=YTrain,
+                        param_dict=param_dict,
+                        folds=5,
+                        bootnum=100)
+
+# Run and Plot
+cv.run()
+
+
+display(X)
+
+
+display(Y)
+
+
+cv.plot()
